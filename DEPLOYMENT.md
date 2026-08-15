@@ -69,9 +69,10 @@ Configure these repository secrets:
 DEPLOY_HOST=<deployment host>
 DEPLOY_USERNAME=<deployment user>
 DEPLOY_SSH_KEY=<private key>
+NOTIFICATION_API_TOKEN=<high-entropy bearer token>
 ```
 
-The workflow runs tests, typecheck, build, shellcheck, and actionlint on every branch. Only `main` deploys. Each deployment is unpacked into a commit-named release, health-checked, and retained with the previous releases.
+The workflow backs up `.env` and synchronizes `NOTIFICATION_API_TOKEN` from the repository secret before starting the release. Keep the same value in every same-VPS caller. The workflow runs tests, typecheck, build, shellcheck, and actionlint on every branch. Only `main` deploys. Each deployment is unpacked into a commit-named release, health-checked, and retained with the previous releases.
 
 ## Rollback
 
