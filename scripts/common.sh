@@ -3,7 +3,9 @@ set -euo pipefail
 
 APP_NAME=${APP_NAME:-letletme-telegram-bot}
 APP_HOME=${APP_HOME:-/home/workspace/letletme-telegram-bot}
-DIST_DIR=${DIST_DIR:-"$APP_HOME/dist"}
+RELEASES_DIR=${RELEASES_DIR:-"$APP_HOME/releases"}
+CURRENT_LINK=${CURRENT_LINK:-"$APP_HOME/current"}
+DIST_DIR=${DIST_DIR:-"$CURRENT_LINK/dist"}
 LOG_DIR=${LOG_DIR:-"$APP_HOME/logs"}
 RUN_DIR=${RUN_DIR:-"$APP_HOME/run"}
 PID_FILE=${PID_FILE:-"$RUN_DIR/$APP_NAME.pid"}
@@ -11,17 +13,22 @@ CONSOLE_LOG=${CONSOLE_LOG:-"$LOG_DIR/console.log"}
 ENV_FILE=${ENV_FILE:-"$APP_HOME/.env"}
 BUN_CMD=${BUN_CMD:-bun}
 ENTRYPOINT=${ENTRYPOINT:-"$DIST_DIR/index.js"}
+HEALTH_URL=${HEALTH_URL:-}
+HEALTH_TIMEOUT_SECONDS=${HEALTH_TIMEOUT_SECONDS:-2}
 
 ensure_dirs() {
-  mkdir -p "$DIST_DIR" "$LOG_DIR" "$RUN_DIR"
+  mkdir -p "$RELEASES_DIR" "$LOG_DIR" "$RUN_DIR"
 }
 
 load_env_file() {
   if [[ -f "$ENV_FILE" ]]; then
-    # shellcheck disable=SC1090
     set -a
+    # shellcheck disable=SC1090
     source "$ENV_FILE"
     set +a
+  fi
+  if [[ -z "$HEALTH_URL" ]]; then
+    HEALTH_URL="http://127.0.0.1:${PORT:-3000}/healthz"
   fi
 }
 
@@ -48,6 +55,10 @@ resolve_entrypoint() {
     return 1
   fi
   echo "$ENTRYPOINT"
+}
+
+check_health() {
+  curl --fail --silent --show-error --max-time "$HEALTH_TIMEOUT_SECONDS" "$HEALTH_URL" >/dev/null
 }
 
 print_status() {

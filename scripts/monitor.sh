@@ -6,6 +6,14 @@ source "$SCRIPT_DIR/common.sh"
 
 print_status
 
+if is_running; then
+  if check_health; then
+    echo "$APP_NAME health: ok"
+  else
+    echo "$APP_NAME health: failed" >&2
+  fi
+fi
+
 if [[ ${1:-} == "-f" ]]; then
   echo "Streaming logs from $CONSOLE_LOG (Ctrl+C to exit)"
   tail -f "$CONSOLE_LOG"

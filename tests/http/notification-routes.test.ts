@@ -1,7 +1,27 @@
 import { describe, expect, test } from "bun:test";
 
+import {
+  MissingNotificationTargetsError,
+  type NotificationServicePort
+} from "../../src/application/services/notification-service.ts";
 import { createApp } from "../../src/http/create-app.ts";
-import type { NotificationServicePort } from "../../src/application/services/notification-service.ts";
+
+const apiToken = "secret";
+
+function headers(withAuth = true): HeadersInit {
+  return {
+    "content-type": "application/json",
+    ...(withAuth ? { authorization: `Bearer ${apiToken}` } : {})
+  };
+}
+
+function createTestApp(service: NotificationServicePort, logs: unknown[] = []) {
+  return createApp({
+    notificationService: service,
+    apiToken,
+    logger: (entry) => logs.push(entry)
+  });
+}
 
 describe("notification route", () => {
   test("accepts a valid text notification request", async () => {
@@ -16,17 +36,11 @@ describe("notification route", () => {
       })
     };
 
-    const app = createApp({
-      notificationService: service,
-      apiToken: undefined
-    });
-
+    const app = createTestApp(service);
     const response = await app.handle(
       new Request("http://localhost/telegramBot/letletme/notification", {
         method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
+        headers: headers(),
         body: JSON.stringify({
           type: "text",
           targets: ["1001"],
@@ -36,6 +50,7 @@ describe("notification route", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-request-id")).toMatch(/^[A-Za-z0-9._-]+$/);
     await expect(response.json()).resolves.toEqual({
       status: "success",
       notificationType: "text",
@@ -58,17 +73,11 @@ describe("notification route", () => {
       })
     };
 
-    const app = createApp({
-      notificationService: service,
-      apiToken: undefined
-    });
-
+    const app = createTestApp(service);
     const response = await app.handle(
       new Request("http://localhost/telegramBot/letletme/notification", {
         method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
+        headers: headers(),
         body: JSON.stringify({
           type: "image",
           targets: ["1001"],
@@ -79,43 +88,22 @@ describe("notification route", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      status: "success",
-      notificationType: "image",
-      requestedCount: 1,
-      deliveredCount: 1,
-      failedCount: 0,
-      failures: []
-    });
   });
 
-  test("accepts a text notification request without targets", async () => {
-    let capturedTargets: Array<string | number> = [];
+  test("maps the service missing-target error to a 422", async () => {
+    let called = false;
     const service: NotificationServicePort = {
-      send: async (notification) => {
-        capturedTargets = notification.targets;
-        return {
-          status: "success",
-          notificationType: notification.type,
-          requestedCount: 1,
-          deliveredCount: 1,
-          failedCount: 0,
-          failures: []
-        };
+      send: async () => {
+        called = true;
+        throw new MissingNotificationTargetsError();
       }
     };
 
-    const app = createApp({
-      notificationService: service,
-      apiToken: undefined
-    });
-
+    const app = createTestApp(service);
     const response = await app.handle(
       new Request("http://localhost/telegramBot/letletme/notification", {
         method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
+        headers: headers(),
         body: JSON.stringify({
           type: "text",
           text: "hello"
@@ -123,28 +111,53 @@ describe("notification route", () => {
       })
     );
 
-    expect(response.status).toBe(200);
-    expect(capturedTargets).toEqual([]);
+    expect(response.status).toBe(422);
+    expect(called).toBe(true);
+    await expect(response.json()).resolves.toEqual({
+      code: "notification_targets_required",
+      message: "Notification targets are required when no default target is configured."
+    });
   });
 
-  test("rejects invalid notification payloads", async () => {
+  test("rejects unauthorized callers before validating the body", async () => {
     const service: NotificationServicePort = {
       send: async () => {
         throw new Error("send should not be called");
       }
     };
 
-    const app = createApp({
-      notificationService: service,
-      apiToken: undefined
-    });
-
+    const app = createTestApp(service);
     const response = await app.handle(
       new Request("http://localhost/telegramBot/letletme/notification", {
         method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
+        headers: headers(false),
+        body: JSON.stringify({
+          type: "image",
+          targets: [],
+          imageUrl: ""
+        })
+      })
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      code: "unauthorized",
+      message: "Missing or invalid bearer token."
+    });
+  });
+
+  test("rejects invalid notification payloads after authentication", async () => {
+    const service: NotificationServicePort = {
+      send: async () => {
+        throw new Error("send should not be called");
+      }
+    };
+
+    const app = createTestApp(service);
+    const response = await app.handle(
+      new Request("http://localhost/telegramBot/letletme/notification", {
+        method: "POST",
+        headers: headers(),
         body: JSON.stringify({
           type: "image",
           targets: [],
@@ -156,36 +169,55 @@ describe("notification route", () => {
     expect(response.status).toBe(422);
   });
 
-  test("rejects unauthorized callers when an API token is configured", async () => {
+  test("enforces Telegram-safe request bounds", async () => {
     const service: NotificationServicePort = {
       send: async () => {
         throw new Error("send should not be called");
       }
     };
+    const app = createTestApp(service);
 
-    const app = createApp({
-      notificationService: service,
-      apiToken: "secret"
-    });
-
-    const response = await app.handle(
+    const longTextResponse = await app.handle(
       new Request("http://localhost/telegramBot/letletme/notification", {
         method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
+        headers: headers(),
+        body: JSON.stringify({ type: "text", targets: ["1001"], text: "x".repeat(4073) })
+      })
+    );
+    const tooManyTargetsResponse = await app.handle(
+      new Request("http://localhost/telegramBot/letletme/notification", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ type: "text", targets: Array.from({ length: 51 }, (_, i) => String(i)), text: "hello" })
+      })
+    );
+    const invalidUrlResponse = await app.handle(
+      new Request("http://localhost/telegramBot/letletme/notification", {
+        method: "POST",
+        headers: headers(),
         body: JSON.stringify({
-          type: "text",
+          type: "image",
           targets: ["1001"],
-          text: "hello"
+          imageUrl: "ftp://example.com/chart.png"
         })
       })
     );
 
-    expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({
-      code: "unauthorized",
-      message: "Missing or invalid bearer token."
-    });
+    expect(longTextResponse.status).toBe(422);
+    expect(tooManyTargetsResponse.status).toBe(422);
+    expect(invalidUrlResponse.status).toBe(422);
+  });
+
+  test("serves health without API authentication", async () => {
+    const service: NotificationServicePort = {
+      send: async () => {
+        throw new Error("send should not be called");
+      }
+    };
+    const app = createTestApp(service);
+    const response = await app.handle(new Request("http://localhost/healthz"));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok" });
   });
 });

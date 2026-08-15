@@ -6,13 +6,14 @@ source "$SCRIPT_DIR/common.sh"
 
 if ! is_running; then
   echo "$APP_NAME is not running. Nothing to stop."
+  rm -f "$PID_FILE"
   exit 0
 fi
 
 PID=$(current_pid)
 echo "Stopping $APP_NAME (PID $PID)"
-kill "$PID"
-for _ in {1..20}; do
+kill "$PID" || true
+for _ in {1..35}; do
   if ! ps -p "$PID" >/dev/null 2>&1; then
     break
   fi

@@ -1,50 +1,36 @@
 # letletme-telegram-bot
 
-`letletme-telegram-bot` is a Bun + TypeScript + Elysia notification service that sends Telegram messages through the Telegram Bot API.
+`letletme-telegram-bot` is a Bun + TypeScript + Elysia notification service. Other systems call one authenticated HTTP endpoint, and the service forwards text or image notifications through the Telegram Bot API.
 
-The current role of this project is notification delivery, not interactive command handling. Other systems call one HTTP endpoint, and this service turns those requests into Telegram text or image notifications.
+## Current role
 
-## What It Does
-
-- exposes one canonical notification endpoint: `POST /telegramBot/letletme/notification`
-- sends text notifications with direct Telegram Bot API `sendMessage` calls
-- sends image notifications with direct Telegram Bot API `sendPhoto` calls
-- prefixes outbound text notifications as `[letletme-telegram-bot] <content>`
-- supports a default text destination through env when a text payload omits `targets`
-- deploys to the VPS at `43.163.91.9`
-
-## Tech Stack
-
-- Bun
-- TypeScript with strict compiler settings
-- Elysia for the HTTP API
-- direct `fetch` calls to the Telegram Bot API
-- Bun test runner
-- GitHub Actions for CI/CD
+- `POST /telegramBot/letletme/notification` sends text or image notifications.
+- Text is prefixed as `[letletme-telegram-bot] <content>`.
+- Text may omit `targets` only when `DEFAULT_TEXT_NOTIFICATION_TARGET` is configured.
+- The service is intentionally stateless and does not implement commands, polling, queues, Redis, or idempotency storage.
 
 ## API
 
-### Endpoint
+### Notification endpoint
 
 ```http
 POST /telegramBot/letletme/notification
 Content-Type: application/json
-Authorization: Bearer <token>   # optional, only when NOTIFICATION_API_TOKEN is configured
+Authorization: Bearer <NOTIFICATION_API_TOKEN>
+X-Request-ID: optional-client-id
 ```
 
-### Text Notification
-
-`targets` is optional for text notifications. If omitted, the service uses `DEFAULT_TEXT_NOTIFICATION_TARGET` from env.
+Text requests accept up to 50 targets and 4072 characters. Image requests accept up to 50 targets, an HTTP(S) image URL, and a caption up to 1024 characters.
 
 ```json
 {
   "type": "text",
   "text": "deployment finished",
-  "targets": [5365651891]
+  "targets": ["<chat-id>"]
 }
 ```
 
-Or, relying on the default text target:
+When `targets` is omitted, the service uses `DEFAULT_TEXT_NOTIFICATION_TARGET`:
 
 ```json
 {
@@ -53,28 +39,18 @@ Or, relying on the default text target:
 }
 ```
 
-Delivered Telegram text format:
-
-```text
-[letletme-telegram-bot] deployment finished
-```
-
-### Image Notification
-
-`targets` is required for image notifications.
+Image example:
 
 ```json
 {
   "type": "image",
   "imageUrl": "https://example.com/chart.png",
   "caption": "daily update",
-  "targets": [5365651891]
+  "targets": ["<chat-id>"]
 }
 ```
 
-### Response Shape
-
-Successful delivery returns a summary like:
+Successful processing returns HTTP 200 with per-target delivery results:
 
 ```json
 {
@@ -87,7 +63,17 @@ Successful delivery returns a summary like:
 }
 ```
 
-Invalid payloads return `422`. Missing or invalid bearer tokens return `401` when auth is enabled.
+`status` is `success`, `partial_failure`, or `failure`. Delivery outcomes remain HTTP 200 so callers do not retry an entire batch and duplicate targets that already succeeded. Retry only failures whose delivery state is known to be `not_delivered`; `unknown` means the transport outcome is ambiguous.
+
+Missing/invalid bearer tokens return `401`. Invalid payloads and a text request with neither targets nor a configured default return `422` with a stable `code`.
+
+### Health endpoint
+
+```http
+GET /healthz
+```
+
+Returns `200 {"status":"ok"}` and does not call Telegram. It is intended for local deployment and monitoring checks.
 
 ## Environment
 
@@ -95,85 +81,43 @@ Required:
 
 ```bash
 TELEGRAM_BOT_TOKEN=...
+NOTIFICATION_API_TOKEN=...
 ```
 
-Common optional settings:
+Optional:
 
 ```bash
+HOST=127.0.0.1
 PORT=8026
-TIMEZONE=Australia/Perth
-NOTIFICATION_API_TOKEN=...
-DEFAULT_TEXT_NOTIFICATION_TARGET=5365651891
+DEFAULT_TEXT_NOTIFICATION_TARGET=<chat-id>
 BUN_CMD=/home/deploy/.bun/bin/bun
 ```
 
-## Local Development
+The default host is loopback. Keep it that way when callers run on the same VPS; use a separately secured TLS proxy or tunnel before exposing the service to another machine.
 
-Install dependencies:
+## Local development
 
 ```bash
 bun install
-```
-
-Run in watch mode:
-
-```bash
 bun run dev
-```
-
-Run tests:
-
-```bash
 bun test
-```
-
-Typecheck:
-
-```bash
 bun run typecheck
-```
-
-Build:
-
-```bash
 bun run build
 ```
 
 ## Deployment
 
-The repo includes:
+The repository includes:
 
-- `scripts/start.sh`
-- `scripts/stop.sh`
-- `scripts/rerun.sh`
-- `scripts/monitor.sh`
+- `scripts/start.sh`, `stop.sh`, `rerun.sh`, `monitor.sh`, `healthcheck.sh`
 - `.github/workflows/ci-cd.yml`
+- `deploy/logrotate/letletme-telegram-bot`
 
-The VPS app home is:
+Deployments unpack into `releases/<commit-sha>` and switch the `current` symlink only after the release is validated. A failed health check restores the previous release. See [DEPLOYMENT.md](./DEPLOYMENT.md) for the VPS layout, env file, caller migration, and rollback procedure.
 
-```bash
-/home/workspace/letletme-telegram-bot
-```
+## Deferred scope
 
-The live service currently runs on:
-
-```bash
-http://127.0.0.1:8026
-```
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for the VPS layout, env file, and GitHub Actions secret requirements.
-
-## Current Boundaries
-
-Included now:
-
-- Telegram notification delivery
-- HTTP API
-- deployment scripts and CI/CD
-
-Deferred for later:
-
-- `/` bot commands
-- polling runtime
-- Redis-backed fan-out
+- Bot commands and polling runtime
+- Redis-backed fan-out or a message queue
+- Durable audit records and idempotency keys
 - OpenAI/FPL integrations

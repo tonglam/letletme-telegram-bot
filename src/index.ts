@@ -2,6 +2,7 @@ import { NotificationService } from "./application/services/notification-service
 import { loadEnv } from "./config/env.ts";
 import { createApp } from "./http/create-app.ts";
 import { TelegramBotApiClient } from "./integrations/telegram/telegram-client.ts";
+import { installGracefulShutdown } from "./runtime/shutdown.ts";
 
 const env = loadEnv();
 
@@ -18,6 +19,18 @@ const app = createApp({
   apiToken: env.notificationApiToken
 });
 
-app.listen(env.port);
+app.listen({
+  hostname: env.host,
+  port: env.port,
+  maxRequestBodySize: 64 * 1024
+});
+installGracefulShutdown(app);
 
-console.log(`letletme-telegram-bot listening on port ${env.port} (${env.timezone})`);
+console.log(
+  JSON.stringify({
+    event: "service_started",
+    service: "letletme-telegram-bot",
+    host: env.host,
+    port: env.port
+  })
+);

@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { NotificationService } from "../../src/application/services/notification-service.ts";
-import type { TelegramClient } from "../../src/integrations/telegram/telegram-client.ts";
+import {
+  MissingNotificationTargetsError,
+  NotificationService
+} from "../../src/application/services/notification-service.ts";
+import type { TelegramClient } from "../../src/application/ports/telegram-client.ts";
 
 describe("NotificationService", () => {
   test("sends text notifications through the message path", async () => {
@@ -49,7 +52,7 @@ describe("NotificationService", () => {
     };
 
     const service = new NotificationService(client, {
-      defaultTextTarget: "5365651891"
+      defaultTextTarget: "123456789"
     });
 
     const result = await service.send({
@@ -67,8 +70,80 @@ describe("NotificationService", () => {
       failures: []
     });
     expect(calls).toEqual([
-      { kind: "text", target: "5365651891", text: "[letletme-telegram-bot] hello" }
+      { kind: "text", target: "123456789", text: "[letletme-telegram-bot] hello" }
     ]);
+  });
+
+  test("rejects an empty target set when no default is configured", async () => {
+    let calls = 0;
+    const service = new NotificationService({
+      sendText: async () => {
+        calls += 1;
+      },
+      sendPhoto: async () => {
+        calls += 1;
+      }
+    });
+
+    await expect(
+      service.send({
+        type: "text",
+        targets: [],
+        text: "hello"
+      })
+    ).rejects.toBeInstanceOf(MissingNotificationTargetsError);
+    expect(calls).toBe(0);
+  });
+
+  test("aggregates partial failures without exposing raw errors", async () => {
+    const client: TelegramClient = {
+      sendText: async ({ target }) => {
+        if (target === "1001") {
+          throw new Error("https://api.telegram.org/botsecret-token leaked");
+        }
+      },
+      sendPhoto: async () => undefined
+    };
+
+    const result = await new NotificationService(client).send({
+      type: "text",
+      targets: ["1001", "1002"],
+      text: "hello"
+    });
+
+    expect(result).toEqual({
+      status: "partial_failure",
+      notificationType: "text",
+      requestedCount: 2,
+      deliveredCount: 1,
+      failedCount: 1,
+      failures: [
+        {
+          target: "1001",
+          code: "telegram_transport_error",
+          deliveryState: "unknown",
+          message: "Notification delivery failed."
+        }
+      ]
+    });
+  });
+
+  test("reports failure when every target fails", async () => {
+    const service = new NotificationService({
+      sendText: async () => {
+        throw new Error("failed");
+      },
+      sendPhoto: async () => undefined
+    });
+
+    const result = await service.send({
+      type: "text",
+      targets: ["1001"],
+      text: "hello"
+    });
+
+    expect(result.status).toBe("failure");
+    expect(result.failedCount).toBe(1);
   });
 
   test("sends image notifications through the photo path and preserves caption", async () => {
@@ -82,9 +157,7 @@ describe("NotificationService", () => {
       }
     };
 
-    const service = new NotificationService(client);
-
-    const result = await service.send({
+    const result = await new NotificationService(client).send({
       type: "image",
       targets: ["@team-chat"],
       imageUrl: "https://example.com/image.png",

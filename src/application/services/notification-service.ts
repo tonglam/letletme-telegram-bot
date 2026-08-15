@@ -1,8 +1,21 @@
-import type { NotificationFailure, NotificationRequest, NotificationResult } from "../../domain/notification.ts";
-import type { TelegramClient } from "../../integrations/telegram/telegram-client.ts";
+import type {
+  NotificationFailure,
+  NotificationFailureCode,
+  NotificationRequest,
+  NotificationResult,
+  NotificationDeliveryState
+} from "../../domain/notification.ts";
+import type { TelegramClient } from "../ports/telegram-client.ts";
 
 export interface NotificationServicePort {
   send(notification: NotificationRequest): Promise<NotificationResult>;
+}
+
+export class MissingNotificationTargetsError extends Error {
+  constructor() {
+    super("Notification targets are required when no default target is configured.");
+    this.name = "MissingNotificationTargetsError";
+  }
 }
 
 type NotificationServiceOptions = {
@@ -34,10 +47,7 @@ export class NotificationService implements NotificationServicePort {
           });
         }
       } catch (error) {
-        failures.push({
-          target,
-          message: error instanceof Error ? error.message : "Unknown delivery error."
-        });
+        failures.push(toNotificationFailure(target, error));
       }
     }
 
@@ -46,7 +56,8 @@ export class NotificationService implements NotificationServicePort {
     const deliveredCount = requestedCount - failedCount;
 
     return {
-      status: failedCount === 0 ? "success" : "partial_failure",
+      status:
+        failedCount === 0 ? "success" : deliveredCount === 0 ? "failure" : "partial_failure",
       notificationType: notification.type,
       requestedCount,
       deliveredCount,
@@ -64,10 +75,49 @@ export class NotificationService implements NotificationServicePort {
       return [this.options.defaultTextTarget];
     }
 
-    return notification.targets;
+    throw new MissingNotificationTargetsError();
   }
 
   private formatText(text: string) {
     return `[letletme-telegram-bot] ${text}`;
   }
+}
+
+function toNotificationFailure(target: NotificationFailure["target"], error: unknown): NotificationFailure {
+  const candidate: {
+    code?: unknown;
+    deliveryState?: unknown;
+    publicMessage?: unknown;
+    retryAfterSeconds?: unknown;
+  } = error !== null && typeof error === "object" ? error : {};
+  const code = isFailureCode(candidate.code) ? candidate.code : "telegram_transport_error";
+  const deliveryState = isDeliveryState(candidate.deliveryState) ? candidate.deliveryState : "unknown";
+  const retryAfterSeconds =
+    typeof candidate.retryAfterSeconds === "number" &&
+    Number.isInteger(candidate.retryAfterSeconds) &&
+    candidate.retryAfterSeconds >= 0
+      ? candidate.retryAfterSeconds
+      : undefined;
+
+  return {
+    target,
+    code,
+    deliveryState,
+    message: typeof candidate.publicMessage === "string" ? candidate.publicMessage : "Notification delivery failed.",
+    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds })
+  };
+}
+
+function isFailureCode(value: unknown): value is NotificationFailureCode {
+  return (
+    value === "telegram_rejected" ||
+    value === "telegram_rate_limited" ||
+    value === "telegram_unavailable" ||
+    value === "telegram_timeout" ||
+    value === "telegram_transport_error"
+  );
+}
+
+function isDeliveryState(value: unknown): value is NotificationDeliveryState {
+  return value === "not_delivered" || value === "unknown";
 }

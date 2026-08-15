@@ -1,8 +1,8 @@
 export type AppEnv = {
   telegramBotToken: string;
+  notificationApiToken: string;
+  host: string;
   port: number;
-  timezone: string;
-  notificationApiToken: string | undefined;
   defaultTextNotificationTarget: string | undefined;
 };
 
@@ -14,13 +14,19 @@ export function parseEnv(source: EnvSource): AppEnv {
     throw new Error("TELEGRAM_BOT_TOKEN is required.");
   }
 
+  const notificationApiToken = source.NOTIFICATION_API_TOKEN?.trim();
+  if (!notificationApiToken) {
+    throw new Error("NOTIFICATION_API_TOKEN is required.");
+  }
+
   const port = parseOptionalPort(source.PORT);
+  const host = source.HOST?.trim() || "127.0.0.1";
 
   return {
     telegramBotToken,
+    notificationApiToken,
+    host,
     port,
-    timezone: source.TIMEZONE?.trim() || "UTC",
-    notificationApiToken: source.NOTIFICATION_API_TOKEN?.trim() || undefined,
     defaultTextNotificationTarget: source.DEFAULT_TEXT_NOTIFICATION_TARGET?.trim() || undefined
   };
 }
@@ -35,8 +41,8 @@ function parseOptionalPort(value: string | undefined): number {
   }
 
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error("PORT must be a positive integer.");
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65_535) {
+    throw new Error("PORT must be an integer between 1 and 65535.");
   }
 
   return parsed;

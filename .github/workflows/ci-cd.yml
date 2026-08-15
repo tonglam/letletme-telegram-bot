@@ -6,16 +6,28 @@ on:
       - "**"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate workflow
+        uses: raven-actions/actionlint@01fce4f43a270a612932cb1c64d40505a029f821 # v2.0.0
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
         with:
           bun-version: "1.2.12"
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck
+
+      - name: Check shell scripts
+        run: shellcheck scripts/*.sh
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -34,15 +46,16 @@ jobs:
           mkdir -p bundle
           cp -R dist bundle/dist
           cp -R scripts bundle/scripts
+          cp -R deploy bundle/deploy
           cp README.md bundle/README.md
           cp DEPLOYMENT.md bundle/DEPLOYMENT.md
-          tar -czf letletme-telegram-bot-dist.tar.gz -C bundle .
+          tar -czf "letletme-telegram-bot-${GITHUB_SHA}.tar.gz" -C bundle .
 
       - name: Upload deploy bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: letletme-telegram-bot-dist
-          path: letletme-telegram-bot-dist.tar.gz
+          path: "letletme-telegram-bot-${{ github.sha }}.tar.gz"
 
   deploy:
     if: github.ref == 'refs/heads/main'
@@ -50,38 +63,81 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download deploy bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: letletme-telegram-bot-dist
           path: .
 
       - name: Create app home on server
-        uses: appleboy/ssh-action@v1.2.2
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USERNAME }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            mkdir -p /home/workspace/letletme-telegram-bot/{dist,logs,run,scripts}
+            mkdir -p /home/workspace/letletme-telegram-bot/{releases,logs,run}
 
       - name: Copy bundle to server
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USERNAME }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: "letletme-telegram-bot-dist.tar.gz"
+          source: "letletme-telegram-bot-${{ github.sha }}.tar.gz"
           target: "/home/workspace/letletme-telegram-bot/"
-          strip_components: 0
 
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1.2.2
+      - name: Deploy release with rollback
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USERNAME }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd /home/workspace/letletme-telegram-bot
-            tar -xzf letletme-telegram-bot-dist.tar.gz
-            chmod +x scripts/*.sh
-            ./scripts/rerun.sh
+            set -euo pipefail
+            APP_HOME=/home/workspace/letletme-telegram-bot
+            RELEASE_ID=${{ github.sha }}
+            ARCHIVE="$APP_HOME/letletme-telegram-bot-${RELEASE_ID}.tar.gz"
+            RELEASES_DIR="$APP_HOME/releases"
+            RELEASE_PATH="$RELEASES_DIR/$RELEASE_ID"
+            STAGING_PATH="$RELEASES_DIR/.${RELEASE_ID}.staging"
+            CURRENT_LINK="$APP_HOME/current"
+
+            test -f "$APP_HOME/.env"
+            previous=""
+            if [[ -L "$CURRENT_LINK" ]]; then
+              previous=$(readlink "$CURRENT_LINK")
+            fi
+
+            if [[ "$previous" == "$RELEASE_PATH" && -d "$RELEASE_PATH" ]]; then
+              APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"
+              APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/healthcheck.sh"
+              rm -f "$ARCHIVE"
+              exit 0
+            fi
+
+            rm -rf "$STAGING_PATH"
+            mkdir -p "$STAGING_PATH"
+            tar -xzf "$ARCHIVE" -C "$STAGING_PATH"
+            test -f "$STAGING_PATH/dist/index.js"
+            test -f "$STAGING_PATH/scripts/start.sh"
+            chmod +x "$STAGING_PATH/scripts"/*.sh
+            rm -rf "$RELEASE_PATH"
+            mv "$STAGING_PATH" "$RELEASE_PATH"
+
+            ln -sfn "$RELEASE_PATH" "$CURRENT_LINK"
+            if ! APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then
+              if [[ -n "$previous" && -d "$previous" ]]; then
+                ln -sfn "$previous" "$CURRENT_LINK"
+                APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh" || true
+              else
+                APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/stop.sh" || true
+              fi
+              exit 1
+            fi
+
+            APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/healthcheck.sh"
+            rm -f "$ARCHIVE"
+
+            while IFS= read -r old_release; do
+              [[ -z "$old_release" ]] || rm -rf -- "$old_release"
+            done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '%T@ %p\n' | sort -nr | awk 'NR > 3 { sub(/^[^ ]+ /, ""); print }')

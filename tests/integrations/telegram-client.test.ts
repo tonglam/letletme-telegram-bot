@@ -20,6 +20,7 @@ describe("TelegramBotApiClient", () => {
           text: "hello"
         })
       );
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
 
       return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
         status: 200,
@@ -68,6 +69,90 @@ describe("TelegramBotApiClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("retries one explicit 429 using retry_after", async () => {
+    const responses = [
+      new Response(JSON.stringify({ ok: false, description: "Too Many Requests", error_code: 429, parameters: { retry_after: 2 } }), {
+        status: 429,
+        headers: { "content-type": "application/json" }
+      }),
+      new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    ];
+    const fetchMock = mock(async () => responses.shift() as Response);
+    const delays: number[] = [];
+    const client = new TelegramBotApiClient({
+      botToken: "token",
+      fetcher: fetchMock,
+      sleeper: async (milliseconds) => {
+        delays.push(milliseconds);
+      }
+    });
+
+    await client.sendText({ target: "1001", text: "hello" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(delays).toEqual([2000]);
+  });
+
+  test("does not retry ambiguous 5xx failures", async () => {
+    const fetchMock = mock(async () =>
+      new Response("upstream unavailable", {
+        status: 503,
+        headers: { "content-type": "text/plain" }
+      })
+    );
+    const client = new TelegramBotApiClient({ botToken: "token", fetcher: fetchMock });
+
+    await expect(client.sendText({ target: "1001", text: "hello" })).rejects.toEqual(
+      new TelegramApiError("Telegram service unavailable.", {
+        statusCode: 503,
+        errorCode: undefined,
+        code: "telegram_unavailable",
+        deliveryState: "unknown"
+      })
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not retry a 429 whose retry_after exceeds the retry budget", async () => {
+    const fetchMock = mock(async () =>
+      new Response(JSON.stringify({ ok: false, error_code: 429, parameters: { retry_after: 11 } }), {
+        status: 429,
+        headers: { "content-type": "application/json" }
+      })
+    );
+    const client = new TelegramBotApiClient({ botToken: "token", fetcher: fetchMock });
+
+    await expect(client.sendText({ target: "1001", text: "hello" })).rejects.toEqual(
+      new TelegramApiError("Telegram rate limit persisted.", {
+        statusCode: 429,
+        errorCode: 429,
+        code: "telegram_rate_limited",
+        deliveryState: "not_delivered",
+        retryAfterSeconds: 11
+      })
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("sanitizes timeout failures", async () => {
+    const fetchMock = mock(async () => {
+      throw new DOMException("timed out", "TimeoutError");
+    });
+    const client = new TelegramBotApiClient({ botToken: "secret-token", fetcher: fetchMock });
+
+    await expect(client.sendText({ target: "1001", text: "hello" })).rejects.toEqual(
+      new TelegramApiError("Telegram request timed out.", {
+        statusCode: 0,
+        errorCode: undefined,
+        code: "telegram_timeout",
+        deliveryState: "unknown"
+      })
+    );
+  });
+
   test("raises a typed error when Telegram rejects a request", async () => {
     const fetchMock = mock(async () => {
       return new Response(JSON.stringify({ ok: false, description: "chat not found" }), {
@@ -88,7 +173,9 @@ describe("TelegramBotApiClient", () => {
     ).rejects.toEqual(
       new TelegramApiError("chat not found", {
         statusCode: 400,
-        errorCode: undefined
+        errorCode: undefined,
+        code: "telegram_rejected",
+        deliveryState: "not_delivered"
       })
     );
   });
