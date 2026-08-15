@@ -8,6 +8,7 @@ describe("installGracefulShutdown", () => {
     const stops: Array<boolean | undefined> = [];
     const exits: number[] = [];
     let cancelled = false;
+    const logs: string[] = [];
 
     installGracefulShutdown(
       {
@@ -26,7 +27,7 @@ describe("installGracefulShutdown", () => {
         cancel: () => {
           cancelled = true;
         },
-        logger: () => undefined
+        logger: (message) => logs.push(message)
       }
     );
 
@@ -36,6 +37,10 @@ describe("installGracefulShutdown", () => {
     expect(stops).toEqual([false]);
     expect(exits).toEqual([0]);
     expect(cancelled).toBe(true);
+    expect(JSON.parse(logs[0] ?? "")).toEqual({
+      event: "shutdown_requested",
+      timestamp: expect.any(String)
+    });
   });
 
   test("forces active connections closed after the drain deadline", async () => {

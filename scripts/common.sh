@@ -18,6 +18,9 @@ HEALTH_TIMEOUT_SECONDS=${HEALTH_TIMEOUT_SECONDS:-2}
 
 ensure_dirs() {
   mkdir -p "$RELEASES_DIR" "$LOG_DIR" "$RUN_DIR"
+  chmod 700 "$LOG_DIR" "$RUN_DIR"
+  touch "$CONSOLE_LOG"
+  chmod 600 "$CONSOLE_LOG"
 }
 
 load_env_file() {

@@ -165,9 +165,35 @@ jobs:
             tar -xzf "$ARCHIVE" -C "$STAGING_PATH"
             test -f "$STAGING_PATH/dist/index.js"
             test -f "$STAGING_PATH/scripts/start.sh"
+            test -f "$STAGING_PATH/deploy/logrotate/letletme-telegram-bot"
             chmod +x "$STAGING_PATH/scripts"/*.sh
             rm -rf "$RELEASE_PATH"
             mv "$STAGING_PATH" "$RELEASE_PATH"
+
+            if [[ "$(id -u)" -eq 0 ]]; then
+              root_command=()
+            elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+              root_command=(sudo -n)
+            else
+              echo "Installing logrotate requires root or passwordless sudo; release not activated." >&2
+              rm -rf "$RELEASE_PATH"
+              exit 1
+            fi
+
+            if ! command -v logrotate >/dev/null 2>&1; then
+              if ! command -v apt-get >/dev/null 2>&1; then
+                echo "logrotate is not installed and apt-get is unavailable; release not activated." >&2
+                rm -rf "$RELEASE_PATH"
+                exit 1
+              fi
+              "${root_command[@]}" apt-get update
+              "${root_command[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install --yes logrotate
+            fi
+
+            "${root_command[@]}" install -m 0644 \
+              "$RELEASE_PATH/deploy/logrotate/letletme-telegram-bot" \
+              /etc/logrotate.d/letletme-telegram-bot
+            "${root_command[@]}" logrotate -d /etc/logrotate.d/letletme-telegram-bot >/dev/null
 
             ln -sfn "$RELEASE_PATH" "$CURRENT_LINK"
             if ! APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then

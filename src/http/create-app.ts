@@ -25,8 +25,9 @@ const imageNotificationSchema = t.Object({
   caption: t.Optional(t.String({ minLength: 1, maxLength: 1024 }))
 });
 
-type RequestLog = {
+export type RequestLog = {
   event: "http_request";
+  timestamp: string;
   requestId: string;
   method: string;
   path: string;
@@ -48,6 +49,14 @@ type RequestMetadata = {
   requestId: string;
   startedAt: number;
 };
+
+export function createRequestLog(fields: Omit<RequestLog, "event" | "timestamp">): RequestLog {
+  return {
+    event: "http_request",
+    timestamp: new Date().toISOString(),
+    ...fields
+  };
+}
 
 export function createApp({ notificationService, apiToken, logger = logRequest }: CreateAppOptions) {
   const requestMetadata = new WeakMap<Request, RequestMetadata>();
@@ -105,22 +114,23 @@ export function createApp({ notificationService, apiToken, logger = logRequest }
       }
 
       const result = isNotificationResult(responseValue) ? responseValue : undefined;
-      logger({
-        event: "http_request",
-        requestId: metadata.requestId,
-        method: request.method,
-        path: new URL(request.url).pathname,
-        statusCode: numericStatus(set.status),
-        durationMs: Math.round(performance.now() - metadata.startedAt),
-        ...(result === undefined
-          ? {}
-          : {
-              notificationType: result.notificationType,
-              requestedCount: result.requestedCount,
-              deliveredCount: result.deliveredCount,
-              failedCount: result.failedCount
-            })
-      });
+      logger(
+        createRequestLog({
+          requestId: metadata.requestId,
+          method: request.method,
+          path: new URL(request.url).pathname,
+          statusCode: numericStatus(set.status),
+          durationMs: Math.round(performance.now() - metadata.startedAt),
+          ...(result === undefined
+            ? {}
+            : {
+                notificationType: result.notificationType,
+                requestedCount: result.requestedCount,
+                deliveredCount: result.deliveredCount,
+                failedCount: result.failedCount
+              })
+        })
+      );
     });
 }
 

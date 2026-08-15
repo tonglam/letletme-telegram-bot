@@ -29,6 +29,7 @@ installGracefulShutdown(app);
 console.log(
   JSON.stringify({
     event: "service_started",
+    timestamp: new Date().toISOString(),
     service: "letletme-telegram-bot",
     host: env.host,
     port: env.port

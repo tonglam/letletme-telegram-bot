@@ -33,14 +33,14 @@ export function installGracefulShutdown(app: StoppableApp, options: ShutdownOpti
     }
 
     shuttingDown = true;
-    logger("Shutdown requested; draining in-flight requests.");
+    logEvent(logger, "shutdown_requested");
     const forceTimer = schedule(() => {
       if (completed) {
         return;
       }
 
       completed = true;
-      logger("Graceful shutdown timed out; closing active connections.");
+      logEvent(logger, "shutdown_timeout");
       void app.stop(true).then(
         () => exit(1),
         () => exit(1)
@@ -63,7 +63,7 @@ export function installGracefulShutdown(app: StoppableApp, options: ShutdownOpti
 
       completed = true;
       cancel(forceTimer);
-      logger("Graceful shutdown failed.");
+      logEvent(logger, "shutdown_failed");
       exit(1);
     }
   };
@@ -74,4 +74,13 @@ export function installGracefulShutdown(app: StoppableApp, options: ShutdownOpti
   signalSource.on("SIGINT", () => {
     void shutdown();
   });
+}
+
+function logEvent(logger: (message: string) => void, event: string): void {
+  logger(
+    JSON.stringify({
+      event,
+      timestamp: new Date().toISOString()
+    })
+  );
 }

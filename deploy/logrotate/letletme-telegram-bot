@@ -1,6 +1,6 @@
 /home/workspace/letletme-telegram-bot/logs/console.log {
   daily
-  size 20M
+  maxsize 20M
   rotate 14
   compress
   delaycompress

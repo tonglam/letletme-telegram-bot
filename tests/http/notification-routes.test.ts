@@ -4,7 +4,7 @@ import {
   MissingNotificationTargetsError,
   type NotificationServicePort
 } from "../../src/application/services/notification-service.ts";
-import { createApp } from "../../src/http/create-app.ts";
+import { createApp, createRequestLog } from "../../src/http/create-app.ts";
 
 const apiToken = "secret";
 
@@ -24,6 +24,26 @@ function createTestApp(service: NotificationServicePort, logs: unknown[] = []) {
 }
 
 describe("notification route", () => {
+  test("creates timestamped request logs without payload fields", () => {
+    const log = createRequestLog({
+      requestId: "request-1",
+      method: "POST",
+      path: "/telegramBot/letletme/notification",
+      statusCode: 200,
+      durationMs: 4
+    });
+
+    expect(log).toEqual({
+      event: "http_request",
+      timestamp: expect.any(String),
+      requestId: "request-1",
+      method: "POST",
+      path: "/telegramBot/letletme/notification",
+      statusCode: 200,
+      durationMs: 4
+    });
+  });
+
   test("accepts a valid text notification request", async () => {
     const service: NotificationServicePort = {
       send: async (notification) => ({

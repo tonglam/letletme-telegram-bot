@@ -59,7 +59,14 @@ Back up `.env`, the current symlink target, and the current commit before the fi
 
 ## Log rotation
 
-Install [deploy/logrotate/letletme-telegram-bot](./deploy/logrotate/letletme-telegram-bot) as `/etc/logrotate.d/letletme-telegram-bot` with the deployment user owning the log directory. The policy rotates daily or at 20 MB, keeps 14 compressed files, and uses `copytruncate` so the Bun process does not need a restart.
+The deployment workflow installs logrotate when missing (using passwordless sudo), installs [deploy/logrotate/letletme-telegram-bot](./deploy/logrotate/letletme-telegram-bot) as `/etc/logrotate.d/letletme-telegram-bot`, and runs a dry-run validation before activating the release. The deployment user must own the log directory and have passwordless sudo for this one-time system configuration:
+
+```bash
+sudo install -m 0644 current/deploy/logrotate/letletme-telegram-bot /etc/logrotate.d/letletme-telegram-bot
+sudo logrotate -d /etc/logrotate.d/letletme-telegram-bot
+```
+
+The policy rotates daily or before 20 MB, keeps 14 rotated files (with the newest compressed on the next cycle because of `delaycompress`), and uses `copytruncate` so the Bun process does not need a restart.
 
 ## GitHub Actions secrets
 
