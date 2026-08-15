@@ -171,34 +171,6 @@ jobs:
             rm -rf "$RELEASE_PATH"
             mv "$STAGING_PATH" "$RELEASE_PATH"
 
-            if [[ "$(id -u)" -eq 0 ]]; then
-              root_command=()
-            elif command -v sudo >/dev/null 2>&1; then
-              root_command=(sudo -n)
-            elif command -v doas >/dev/null 2>&1; then
-              root_command=(doas -n)
-            else
-              echo "Installing logrotate requires root or sudo/doas; release not activated." >&2
-              echo "remote_user=$(id -un) uid=$(id -u) sudo=$(command -v sudo || true) doas=$(command -v doas || true)" >&2
-              rm -rf "$RELEASE_PATH"
-              exit 1
-            fi
-
-            if ! command -v logrotate >/dev/null 2>&1; then
-              if ! command -v apt-get >/dev/null 2>&1; then
-                echo "logrotate is not installed and apt-get is unavailable; release not activated." >&2
-                rm -rf "$RELEASE_PATH"
-                exit 1
-              fi
-              "${root_command[@]}" apt-get update
-              "${root_command[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install --yes logrotate
-            fi
-
-            "${root_command[@]}" install -m 0644 \
-              "$RELEASE_PATH/deploy/logrotate/letletme-telegram-bot" \
-              /etc/logrotate.d/letletme-telegram-bot
-            "${root_command[@]}" logrotate -d /etc/logrotate.d/letletme-telegram-bot >/dev/null
-
             ln -sfn "$RELEASE_PATH" "$CURRENT_LINK"
             if ! APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then
               if [[ -n "$previous" && -d "$previous" ]]; then
@@ -222,3 +194,41 @@ jobs:
             while IFS= read -r old_release; do
               [[ -z "$old_release" ]] || rm -rf -- "$old_release"
             done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -not -name '.*' -printf '%T@ %p\n' | sort -nr | awk 'NR > 3 { sub(/^[^ ]+ /, ""); print }')
+
+      - name: Install logrotate policy as tong
+        uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_TONG_USERNAME }}
+          key: ${{ secrets.DEPLOY_TONG_SSH_KEY }}
+          request_pty: true
+          script: |
+            set -euo pipefail
+            APP_HOME=/home/workspace/letletme-telegram-bot
+            CONFIG="$APP_HOME/current/deploy/logrotate/letletme-telegram-bot"
+            test -f "$CONFIG"
+
+            if [[ "$(id -u)" -eq 0 ]]; then
+              root_command=()
+            elif command -v sudo >/dev/null 2>&1; then
+              root_command=(sudo -n)
+            elif command -v doas >/dev/null 2>&1; then
+              root_command=(doas -n)
+            else
+              echo "tong must be root or have passwordless sudo/doas to install logrotate." >&2
+              echo "remote_user=$(id -un) uid=$(id -u) sudo=$(command -v sudo || true) doas=$(command -v doas || true)" >&2
+              exit 1
+            fi
+
+            if ! command -v logrotate >/dev/null 2>&1; then
+              if ! command -v apt-get >/dev/null 2>&1; then
+                echo "logrotate is not installed and apt-get is unavailable." >&2
+                exit 1
+              fi
+              "${root_command[@]}" apt-get update
+              "${root_command[@]}" env DEBIAN_FRONTEND=noninteractive apt-get install --yes logrotate
+            fi
+
+            "${root_command[@]}" install -m 0644 "$CONFIG" /etc/logrotate.d/letletme-telegram-bot
+            "${root_command[@]}" logrotate -d /etc/logrotate.d/letletme-telegram-bot >/dev/null
+            echo "Installed and validated /etc/logrotate.d/letletme-telegram-bot as $(id -un)"

@@ -59,7 +59,7 @@ Back up `.env`, the current symlink target, and the current commit before the fi
 
 ## Log rotation
 
-The deployment workflow installs logrotate when missing (using passwordless sudo), installs [deploy/logrotate/letletme-telegram-bot](./deploy/logrotate/letletme-telegram-bot) as `/etc/logrotate.d/letletme-telegram-bot`, and runs a dry-run validation before activating the release. The deployment user must own the log directory and have passwordless sudo for this one-time system configuration:
+After the application release is healthy, the deployment workflow connects as the privileged `tong` account, installs logrotate when missing, installs [deploy/logrotate/letletme-telegram-bot](./deploy/logrotate/letletme-telegram-bot) as `/etc/logrotate.d/letletme-telegram-bot`, and runs a dry-run validation. The regular deployment account only needs to own the application directories; `tong` must be root or have passwordless sudo/doas for this one-time system configuration:
 
 ```bash
 sudo install -m 0644 current/deploy/logrotate/letletme-telegram-bot /etc/logrotate.d/letletme-telegram-bot
@@ -76,6 +76,8 @@ Configure these repository secrets:
 DEPLOY_HOST=<deployment host>
 DEPLOY_USERNAME=<deployment user>
 DEPLOY_SSH_KEY=<private key>
+DEPLOY_TONG_USERNAME=tong
+DEPLOY_TONG_SSH_KEY=<tong private key>
 NOTIFICATION_API_TOKEN=<high-entropy bearer token>
 ```
 
