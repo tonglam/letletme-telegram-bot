@@ -199,8 +199,8 @@ jobs:
         uses: appleboy/ssh-action@2ead5e36573f08b82fbfce1504f1a4b05a647c6f # v1.2.2
         with:
           host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_TONG_USERNAME }}
-          key: ${{ secrets.DEPLOY_TONG_SSH_KEY }}
+          username: tong
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
           request_pty: true
           script: |
             set -euo pipefail
