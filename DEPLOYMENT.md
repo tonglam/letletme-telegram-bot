@@ -75,7 +75,9 @@ Configure these repository secrets:
 ```text
 DEPLOY_HOST=<deployment host>
 DEPLOY_USERNAME=<deployment user>
-DEPLOY_SSH_KEY=<private key authorized for the deployment user and tong>
+DEPLOY_SSH_KEY=<deployment private key>
+DEPLOY_TONG_USERNAME=tong
+DEPLOY_TONG_SSH_KEY=<private key authorized for tong>
 NOTIFICATION_API_TOKEN=<high-entropy bearer token>
 ```
 
