@@ -103,9 +103,17 @@ jobs:
             CURRENT_LINK="$APP_HOME/current"
 
             test -f "$APP_HOME/.env"
+            if ! grep -Eq '^[[:space:]]*NOTIFICATION_API_TOKEN=[^[:space:]#]+([[:space:]]*#.*)?$' "$APP_HOME/.env"; then
+              echo "NOTIFICATION_API_TOKEN is missing or empty in $APP_HOME/.env" >&2
+              if [[ -x "$APP_HOME/scripts/start.sh" ]]; then
+                APP_HOME="$APP_HOME" "$APP_HOME/scripts/start.sh" || true
+              fi
+              exit 1
+            fi
+
             previous=""
             if [[ -L "$CURRENT_LINK" ]]; then
-              previous=$(readlink "$CURRENT_LINK")
+              previous=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
             fi
 
             if [[ "$previous" == "$RELEASE_PATH" && -d "$RELEASE_PATH" ]]; then
@@ -128,7 +136,13 @@ jobs:
             if ! APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then
               if [[ -n "$previous" && -d "$previous" ]]; then
                 ln -sfn "$previous" "$CURRENT_LINK"
-                APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh" || true
+                if ! APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then
+                  if [[ -x "$APP_HOME/scripts/start.sh" ]]; then
+                    APP_HOME="$APP_HOME" "$APP_HOME/scripts/start.sh" || true
+                  fi
+                fi
+              elif [[ -x "$APP_HOME/scripts/start.sh" ]]; then
+                APP_HOME="$APP_HOME" "$APP_HOME/scripts/start.sh" || true
               else
                 APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/stop.sh" || true
               fi
