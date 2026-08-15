@@ -129,6 +129,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USERNAME }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          request_pty: true
           script: |
             set -euo pipefail
             APP_HOME=/home/workspace/letletme-telegram-bot
@@ -174,8 +175,11 @@ jobs:
               root_command=()
             elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
               root_command=(sudo -n)
+            elif command -v doas >/dev/null 2>&1 && doas -n true 2>/dev/null; then
+              root_command=(doas -n)
             else
-              echo "Installing logrotate requires root or passwordless sudo; release not activated." >&2
+              echo "Installing logrotate requires root or passwordless sudo/doas; release not activated." >&2
+              echo "remote_user=$(id -un) uid=$(id -u) sudo=$(command -v sudo || true) doas=$(command -v doas || true)" >&2
               rm -rf "$RELEASE_PATH"
               exit 1
             fi
