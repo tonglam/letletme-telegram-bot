@@ -9,7 +9,24 @@ import type { TelegramClient } from "../ports/telegram-client.ts";
 
 export interface NotificationServicePort {
   send(notification: NotificationRequest): Promise<NotificationResult>;
+  getOperationalStatus?(): NotificationOperationalStatus;
 }
+
+export type NotificationOperationalStatus = {
+  release: string;
+  startedAt: string;
+  configReady: boolean;
+  delivery: {
+    attempted: number;
+    delivered: number;
+    failed: number;
+    unknown: number;
+    rateLimited: number;
+  };
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureCode: string | null;
+};
 
 export class MissingNotificationTargetsError extends Error {
   constructor() {
@@ -20,9 +37,23 @@ export class MissingNotificationTargetsError extends Error {
 
 type NotificationServiceOptions = {
   defaultTextTarget?: string | undefined;
+  release?: string | undefined;
+  configReady?: boolean | undefined;
 };
 
 export class NotificationService implements NotificationServicePort {
+  private readonly startedAt = new Date().toISOString();
+  private readonly counters = {
+    attempted: 0,
+    delivered: 0,
+    failed: 0,
+    unknown: 0,
+    rateLimited: 0,
+    lastAttemptAt: null as string | null,
+    lastSuccessAt: null as string | null,
+    lastFailureCode: null as string | null,
+  };
+
   constructor(
     private readonly telegramClient: TelegramClient,
     private readonly options: NotificationServiceOptions = {}
@@ -30,9 +61,16 @@ export class NotificationService implements NotificationServicePort {
 
   async send(notification: NotificationRequest): Promise<NotificationResult> {
     const failures: NotificationFailure[] = [];
-    const targets = this.resolveTargets(notification);
+    let targets: ReturnType<NotificationService['resolveTargets']> extends infer T ? T : never;
+    try {
+      targets = this.resolveTargets(notification);
+    } catch (error) {
+      throw error;
+    }
 
     for (const target of targets) {
+      this.counters.attempted += 1;
+      this.counters.lastAttemptAt = new Date().toISOString();
       try {
         if (notification.type === "text") {
           await this.telegramClient.sendText({
@@ -46,8 +84,12 @@ export class NotificationService implements NotificationServicePort {
             caption: notification.caption
           });
         }
+        this.counters.delivered += 1;
+        this.counters.lastSuccessAt = new Date().toISOString();
       } catch (error) {
-        failures.push(toNotificationFailure(target, error));
+        const failure = toNotificationFailure(target, error);
+        this.recordFailure(failure);
+        failures.push(failure);
       }
     }
 
@@ -64,6 +106,37 @@ export class NotificationService implements NotificationServicePort {
       failedCount,
       failures
     };
+  }
+
+  getOperationalStatus(): NotificationOperationalStatus {
+    return {
+      release: this.options.release ?? 'unknown',
+      startedAt: this.startedAt,
+      configReady: this.options.configReady ?? true,
+      delivery: {
+        attempted: this.counters.attempted,
+        delivered: this.counters.delivered,
+        failed: this.counters.failed,
+        unknown: this.counters.unknown,
+        rateLimited: this.counters.rateLimited,
+      },
+      lastAttemptAt: this.counters.lastAttemptAt,
+      lastSuccessAt: this.counters.lastSuccessAt,
+      lastFailureCode: this.counters.lastFailureCode,
+    };
+  }
+
+  private recordFailure(error: unknown): void {
+    this.counters.failed += 1;
+    const candidate = error !== null && typeof error === 'object' ? error as {
+      code?: unknown;
+      deliveryState?: unknown;
+    } : {};
+    if (candidate.deliveryState === 'unknown') this.counters.unknown += 1;
+    if (candidate.code === 'telegram_rate_limited') this.counters.rateLimited += 1;
+    this.counters.lastFailureCode = typeof candidate.code === 'string'
+      ? candidate.code
+      : 'telegram_transport_error';
   }
 
   private resolveTargets(notification: NotificationRequest) {

@@ -155,7 +155,7 @@ jobs:
             fi
 
             if [[ "$previous" == "$RELEASE_PATH" && -d "$RELEASE_PATH" ]]; then
-              APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"
+              LETLETME_RELEASE_SHA="$RELEASE_ID" APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"
               APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/healthcheck.sh"
               rm -f "$ARCHIVE"
               exit 0
@@ -172,10 +172,10 @@ jobs:
             mv "$STAGING_PATH" "$RELEASE_PATH"
 
             ln -sfn "$RELEASE_PATH" "$CURRENT_LINK"
-            if ! APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then
+            if ! LETLETME_RELEASE_SHA="$RELEASE_ID" APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then
               if [[ -n "$previous" && -d "$previous" ]]; then
                 ln -sfn "$previous" "$CURRENT_LINK"
-                if ! APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then
+                if ! LETLETME_RELEASE_SHA="$RELEASE_ID" APP_HOME="$APP_HOME" CURRENT_LINK="$CURRENT_LINK" "$CURRENT_LINK/scripts/rerun.sh"; then
                   if [[ -x "$APP_HOME/scripts/start.sh" ]]; then
                     APP_HOME="$APP_HOME" "$APP_HOME/scripts/start.sh" || true
                   fi

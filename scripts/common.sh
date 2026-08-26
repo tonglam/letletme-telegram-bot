@@ -16,6 +16,24 @@ ENTRYPOINT=${ENTRYPOINT:-"$DIST_DIR/index.js"}
 HEALTH_URL=${HEALTH_URL:-}
 HEALTH_TIMEOUT_SECONDS=${HEALTH_TIMEOUT_SECONDS:-2}
 
+resolve_release_id() {
+  if [[ -n "${LETLETME_RELEASE_SHA:-}" ]]; then
+    printf '%s\n' "$LETLETME_RELEASE_SHA"
+    return 0
+  fi
+
+  if [[ -L "$CURRENT_LINK" ]]; then
+    local current_target
+    current_target=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
+    if [[ -n "$current_target" ]]; then
+      basename -- "$current_target"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "unknown"
+}
+
 ensure_dirs() {
   mkdir -p "$RELEASES_DIR" "$LOG_DIR" "$RUN_DIR"
   chmod 700 "$LOG_DIR" "$RUN_DIR"

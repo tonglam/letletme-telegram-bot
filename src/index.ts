@@ -11,7 +11,9 @@ const telegramClient = new TelegramBotApiClient({
 });
 
 const notificationService = new NotificationService(telegramClient, {
-  defaultTextTarget: env.defaultTextNotificationTarget
+  defaultTextTarget: env.defaultTextNotificationTarget,
+  configReady: Boolean(env.telegramBotToken && env.notificationApiToken),
+  release: process.env.LETLETME_RELEASE_SHA?.trim() || process.env.VERCEL_GIT_COMMIT_SHA?.trim() || "unknown"
 });
 
 const app = createApp({
