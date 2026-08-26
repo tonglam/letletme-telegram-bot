@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 
 import {
   MissingNotificationTargetsError,
+  type NotificationOperationalStatus,
   type NotificationServicePort
 } from "../application/services/notification-service.ts";
 import type { NotificationResult } from "../domain/notification.ts";
@@ -83,6 +84,19 @@ export function createApp({ notificationService, apiToken, logger = logRequest }
       }
     })
     .get("/healthz", () => ({ status: "ok" }))
+    .get("/health/ready", ({ set }) => {
+      const status = notificationService.getOperationalStatus?.();
+      const ready = status?.configReady ?? true;
+      if (!ready) set.status = 503;
+      return { status: ready ? "ok" : "not_ready", configReady: ready };
+    })
+    .get("/internal/ops/status", ({ headers, set }) => {
+      if (!isAuthorized(headers.authorization ?? null, apiToken)) {
+        set.status = 401;
+        return { code: "unauthorized", message: "Missing or invalid bearer token." };
+      }
+      return statusForService(notificationService);
+    })
     .post(
       notificationPath,
       async ({ body, set }) => {
@@ -132,6 +146,18 @@ export function createApp({ notificationService, apiToken, logger = logRequest }
         })
       );
     });
+}
+
+function statusForService(service: NotificationServicePort): NotificationOperationalStatus {
+  return service.getOperationalStatus?.() ?? {
+    release: "unknown",
+    startedAt: new Date().toISOString(),
+    configReady: false,
+    delivery: { attempted: 0, delivered: 0, failed: 0, unknown: 0, rateLimited: 0 },
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    lastFailureCode: null,
+  };
 }
 
 function isAuthorized(header: string | null, expectedToken: string): boolean {

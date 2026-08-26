@@ -5,6 +5,7 @@ import {
   NotificationService
 } from "../../src/application/services/notification-service.ts";
 import type { TelegramClient } from "../../src/application/ports/telegram-client.ts";
+import { TelegramApiError } from "../../src/integrations/telegram/telegram-client.ts";
 
 describe("NotificationService", () => {
   test("sends text notifications through the message path", async () => {
@@ -173,5 +174,44 @@ describe("NotificationService", () => {
         caption: "latest chart"
       }
     ]);
+  });
+
+  test("exposes release, readiness, and bounded delivery counters", async () => {
+    const service = new NotificationService(
+      {
+        sendText: async ({ target }) => {
+          if (target === "429") {
+            throw new TelegramApiError("Telegram rate limit persisted.", {
+              statusCode: 429,
+              errorCode: 429,
+              code: "telegram_rate_limited",
+              deliveryState: "not_delivered",
+              retryAfterSeconds: 3
+            });
+          }
+        },
+        sendPhoto: async () => undefined
+      },
+      { release: "release-sha", configReady: false }
+    );
+
+    await service.send({
+      type: "text",
+      targets: ["ok", "429"],
+      text: "health probe"
+    });
+
+    expect(service.getOperationalStatus()).toMatchObject({
+      release: "release-sha",
+      configReady: false,
+      delivery: {
+        attempted: 2,
+        delivered: 1,
+        failed: 1,
+        unknown: 0,
+        rateLimited: 1
+      },
+      lastFailureCode: "telegram_rate_limited"
+    });
   });
 });
