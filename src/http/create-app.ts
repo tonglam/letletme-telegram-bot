@@ -86,7 +86,7 @@ export function createApp({ notificationService, apiToken, logger = logRequest }
     .get("/healthz", () => ({ status: "ok" }))
     .get("/health/ready", ({ set }) => {
       const status = notificationService.getOperationalStatus?.();
-      const ready = status?.configReady ?? true;
+      const ready = status?.configReady ?? false;
       if (!ready) set.status = 503;
       return { status: ready ? "ok" : "not_ready", configReady: ready };
     })

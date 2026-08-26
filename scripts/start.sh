@@ -6,6 +6,8 @@ source "$SCRIPT_DIR/common.sh"
 
 load_env_file
 ensure_dirs
+release_id=$(resolve_release_id)
+export LETLETME_RELEASE_SHA="$release_id"
 
 if is_running; then
   echo "$APP_NAME already running with PID $(current_pid). Use stop.sh first if you need to restart."
@@ -15,7 +17,7 @@ fi
 ENTRY_PATH=$(resolve_entrypoint)
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 echo "[$TIMESTAMP] Starting $APP_NAME using $ENTRY_PATH"
-nohup "$BUN_CMD" "$ENTRY_PATH" >>"$CONSOLE_LOG" 2>&1 &
+nohup env LETLETME_RELEASE_SHA="$LETLETME_RELEASE_SHA" "$BUN_CMD" "$ENTRY_PATH" >>"$CONSOLE_LOG" 2>&1 &
 PID=$!
 echo "$PID" > "$PID_FILE"
 chmod 600 "$PID_FILE"

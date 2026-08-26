@@ -65,7 +65,6 @@ export class NotificationService implements NotificationServicePort {
     try {
       targets = this.resolveTargets(notification);
     } catch (error) {
-      this.recordFailure(error);
       throw error;
     }
 
@@ -88,8 +87,9 @@ export class NotificationService implements NotificationServicePort {
         this.counters.delivered += 1;
         this.counters.lastSuccessAt = new Date().toISOString();
       } catch (error) {
-        this.recordFailure(error);
-        failures.push(toNotificationFailure(target, error));
+        const failure = toNotificationFailure(target, error);
+        this.recordFailure(failure);
+        failures.push(failure);
       }
     }
 
